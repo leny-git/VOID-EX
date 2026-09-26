@@ -1,362 +1,314 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-================================================================================
-  SYSTEM NAME    : VOID-EX SECURITY FRAMEWORK
-  VERSION        : 1.0.0 APEX CORE
-  ARCHITECTURE   : Asynchronous OOP Framework
-  OPERATOR       : LENY // Enterprise Security Architecture
-================================================================================
+====================================================================
+               VOID-SENTINEL v1.0 // UNIFIED DEFENSE ENGINE
+====================================================================
+Copyright (c) 2026 LENY. All Rights Reserved.
+License: VOID-EX Open Source License v1.0
 """
 
-import asyncio
-import socket
-import ssl
-import hashlib
-import base64
 import os
 import sys
-import time
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
-from abc import ABC, abstractmethod
+import math
+import hashlib
+import json
+import ast
+import platform
+import psutil
+import socket
+import random
+from datetime import datetime
 
-# ==============================================================================
-# GÖRSEL MİMARİ VE TERMİNAL RENKLERİ (ANSI PALETTE)
-# ==============================================================================
-class TermColor:
-    CYAN      = "\033[96m"
-    GREEN     = "\033[92m"
-    YELLOW    = "\033[93m"
-    RED       = "\033[91m"
-    MAGENTA   = "\033[95m"
-    BLUE      = "\033[94m"
-    GRAY      = "\033[90m"
-    BOLD      = "\033[1m"
-    RESET     = "\033[0m"
+# ====================================================================
+# COLOR & FORMATTING UTILITIES
+# ====================================================================
+class Colors:
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    END = '\033[0m'
 
-# ==============================================================================
-# VERİ YAPILARI (DATA MODELS)
-# ==============================================================================
-@dataclass
-class TargetData:
-    domain: str
-    ip_address: str = ""
-    dns_records: Dict[str, str] = field(default_factory=dict)
-    open_ports: Dict[int, str] = field(default_factory=dict)
-    ssl_info: Dict[str, Any] = field(default_factory=dict)
+def log_info(msg):
+    print(f"{Colors.CYAN}[*] {msg}{Colors.END}")
 
-# ==============================================================================
-# SOYUT TABAN SINIF (ABSTRACT BASE MODULE)
-# ==============================================================================
-class BaseVoidModule(ABC):
-    """Tüm VOID-EX modüllerinin türeyeceği zorunlu şablon."""
-    
-    def __init__(self, module_name: str, description: str):
-        self.module_name = module_name
-        self.description = description
+def log_success(msg):
+    print(f"{Colors.GREEN}[+] {msg}{Colors.END}")
 
-    @abstractmethod
-    async def run(self, payload: Any) -> Dict[str, Any]:
-        pass
+def log_warn(msg):
+    print(f"{Colors.YELLOW}[!] {msg}{Colors.END}")
 
-# ==============================================================================
-# MODÜL 1: ASENKRON AĞ VE OSINT İSTİHBARAT MOTORU
-# ==============================================================================
-class ReconModule(BaseVoidModule):
-    def __init__(self):
-        super().__init__(
-            module_name="RECON-INTEL-V1",
-            description="Asenkron DNS, Port Scanner ve SSL Sertifika Analizörü"
-        )
-        self.target_ports = [21, 22, 53, 80, 135, 139, 443, 445, 3306, 3389, 8080]
+def log_danger(msg):
+    print(f"{Colors.RED}[CRITICAL] {msg}{Colors.END}")
 
-    async def _resolve_dns(self, domain: str) -> str:
-        """Domain adresini IP adresine dönüştürür."""
-        loop = asyncio.get_running_loop()
-        try:
-            ip = await loop.run_in_executor(None, socket.gethostbyname, domain)
-            return ip
-        except socket.gaierror:
-            return ""
 
-    async def _scan_port(self, ip: str, port: int) -> tuple[int, bool, str]:
-        """Tekil port için non-blocking socket denemesi yapar."""
-        try:
-            conn = asyncio.open_connection(ip, port)
-            reader, writer = await asyncio.wait_for(conn, timeout=1.0)
-            
-            banner = "Servis Yanıtı Alınamadı"
+# ====================================================================
+# ENGINE 1: DFIR & SYSTEM TRIAGE MOTORU
+# ====================================================================
+class TriageEngine:
+    @staticmethod
+    def run_system_triage():
+        log_info("Sistem Triage & Adli Bilişim Taraması Başlatılıyor...")
+        
+        info = {
+            "timestamp": str(datetime.now()),
+            "os": platform.system(),
+            "release": platform.release(),
+            "arch": platform.machine(),
+            "cpu_usage": f"{psutil.cpu_percent()}%",
+            "memory_usage": f"{psutil.virtual_memory().percent}%",
+            "active_processes": [],
+            "listening_ports": []
+        }
+        
+        # Süreç Taraması & SHA-256 Hash Alımı
+        log_info("Çalışan süreçler ve hash değerleri analiz ediliyor...")
+        for proc in psutil.process_iter(['pid', 'name', 'exe']):
             try:
-                writer.write(b"HEAD / HTTP/1.0\r\n\r\n")
-                await writer.drain()
-                data = await asyncio.wait_for(reader.read(128), timeout=0.5)
-                if data:
-                    banner = data.decode('utf-8', errors='ignore').split('\n')[0].strip()[:35]
-            except Exception:
-                pass
+                p_info = proc.info
+                p_exe = p_info['exe']
+                p_hash = "N/A"
+                if p_exe and os.path.isfile(p_exe):
+                    hasher = hashlib.sha256()
+                    with open(p_exe, 'rb') as f:
+                        hasher.update(f.read(4096))
+                    p_hash = hasher.hexdigest()
+                
+                info["active_processes"].append({
+                    "pid": p_info['pid'],
+                    "name": p_info['name'],
+                    "hash": p_hash
+                })
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
 
-            writer.close()
-            await writer.wait_closed()
-            return port, True, banner
-        except Exception:
-            return port, False, ""
+        # Ağ Soketleri Taraması
+        log_info("Açık ağ soketleri ve bağlantılar taranıyor...")
+        for conn in psutil.net_connections(kind='inet'):
+            if conn.status == 'LISTEN':
+                info["listening_ports"].append({
+                    "fd": conn.fd,
+                    "laddr": f"{conn.laddr.ip}:{conn.laddr.port}",
+                    "pid": conn.pid
+                })
 
-    async def _check_ssl(self, domain: str) -> Dict[str, Any]:
-        """Target domain için SSL sertifika detaylarını çeker."""
-        loop = asyncio.get_running_loop()
-        def fetch_ssl():
-            ctx = ssl.create_default_context()
-            with socket.create_connection((domain, 443), timeout=2.0) as sock:
-                with ctx.wrap_socket(sock, server_hostname=domain) as ssock:
-                    return ssock.getpeercert()
-        try:
-            cert = await loop.run_in_executor(None, fetch_ssl)
-            subject = dict(x[0] for x in cert.get('subject', []))
-            issuer = dict(x[0] for x in cert.get('issuer', []))
-            return {
-                "common_name": subject.get('commonName', 'Bilinmiyor'),
-                "issuer": issuer.get('organizationName', 'Bilinmiyor'),
-                "valid_till": cert.get('notAfter', 'Bilinmiyor')
-            }
-        except Exception:
-            return {"status": "SSL Portu (443) Kapalı veya Bağlantı Sağlanamadı"}
+        log_success(f"Triage Tamamlandı! Toplam Süreç: {len(info['active_processes'])}, Dinlenen Port: {len(info['listening_ports'])}")
+        return info
 
-    async def run(self, payload: str) -> Dict[str, Any]:
-        target = TargetData(domain=payload)
-        print(f"\n{TermColor.CYAN}[*] [{self.module_name}] Analiz Başlatıldı: {payload}{TermColor.RESET}")
 
-        # 1. DNS Resolution
-        target.ip_address = await self._resolve_dns(target.domain)
-        if not target.ip_address:
-            return {"error": f"Domain IP adresine dönüştürülemedi: {payload}"}
+# ====================================================================
+# ENGINE 2: NET TRAFFIC & SHANNON ENTROPY MOTORU
+# ====================================================================
+class NetworkEntropyEngine:
+    @staticmethod
+    def calculate_entropy(data: bytes) -> float:
+        """Shannon Entropi Algoritması: H(X) = -sum(P(x) * log2(P(x)))"""
+        if not data:
+            return 0.0
+        entropy = 0
+        for x in range(256):
+            p_x = data.count(bytes([x])) / len(data)
+            if p_x > 0:
+                entropy += - p_x * math.log2(p_x)
+        return entropy
 
-        print(f"{TermColor.GREEN}[+] Hedef IP Tespit Edildi: {target.ip_address}{TermColor.RESET}")
-
-        # 2. Async Port Scan
-        print(f"{TermColor.YELLOW}[*] Asenkron Port Tarayıcısı Çalıştırılıyor...{TermColor.RESET}")
-        tasks = [self._scan_port(target.ip_address, p) for p in self.target_ports]
-        scan_results = await asyncio.gather(*tasks)
-
-        for port, is_open, banner in scan_results:
-            if is_open:
-                target.open_ports[port] = banner
-
-        # 3. SSL Analysis
-        print(f"{TermColor.YELLOW}[*] SSL/TLS Sertifika Analizi Yapılıyor...{TermColor.RESET}")
-        target.ssl_info = await self._check_ssl(target.domain)
+    @classmethod
+    def analyze_payload_entropy(cls, payload: bytes):
+        score = cls.calculate_entropy(payload)
+        status = "Normal Metin / Düzenli Veri"
+        if score > 7.2:
+            status = "Yüksek Entropi (Şifrelenmiş veya Sıkıştırılmış Tünelleme Verisi!)"
+        elif score > 5.0:
+            status = "Orta Entropi (Karmaşık Veri / Kod)"
 
         return {
-            "domain": target.domain,
-            "ip": target.ip_address,
-            "open_ports": target.open_ports,
-            "ssl_info": target.ssl_info
+            "bytes_length": len(payload),
+            "entropy_score": round(score, 4),
+            "assessment": status
         }
 
-# ==============================================================================
-# MODÜL 2: KRİPTOGRAFİ VE VERİ GİZLEME (STEGANOGRAPHY) MOTORU
-# ==============================================================================
-class CryptoStegoModule(BaseVoidModule):
-    def __init__(self):
-        super().__init__(
-            module_name="CRYPTO-STEGO-V1",
-            description="PBKDF2 + Matris Şifreleme ve Metin Veri Gizleyici"
-        )
 
-    def _derive_key(self, secret_pass: str, salt: bytes) -> bytes:
-        """Kullanıcı parolasından 256-bit güvenli anahtar türetir."""
-        return hashlib.pbkdf2_hmac('sha256', secret_pass.encode(), salt, 100000)
+# ====================================================================
+# ENGINE 3: SHAMIR SECRET SHARING & CASCADE KRİPTOGRAFİ MOTORU
+# ====================================================================
+class ShamirSecretVault:
+    _PRIME = 2**127 - 1  # Mersenne Prime for Galois Field operations
 
-    def encrypt_data(self, plain_text: str, secret_pass: str) -> str:
-        """Metni PBKDF2 ve XOR/Base64 algoritmalarıyla şifreler."""
-        salt = os.urandom(16)
-        key = self._derive_key(secret_pass, salt)
-        text_bytes = plain_text.encode('utf-8')
+    @classmethod
+    def _eval_at(cls, poly, x):
+        accum = 0
+        for coeff in reversed(poly):
+            accum = (accum * x + coeff) % cls._PRIME
+        return accum
+
+    @classmethod
+    def split_secret(cls, secret_int: int, threshold: int, num_shares: int):
+        """Gizli anahtarı N parçaya böler, çözmek için K kadarı gerekir."""
+        if threshold > num_shares:
+            raise ValueError("Eşik değeri toplam parça sayısından büyük olamaz.")
         
-        cipher_bytes = bytearray()
-        for i in range(len(text_bytes)):
-            cipher_bytes.append(text_bytes[i] ^ key[i % len(key)])
+        poly = [secret_int] + [random.randint(1, cls._PRIME - 1) for _ in range(threshold - 1)]
+        shares = []
+        for i in range(1, num_shares + 1):
+            shares.append((i, cls._eval_at(poly, i)))
+        return shares
 
-        final_payload = salt + bytes(cipher_bytes)
-        return base64.b64encode(final_payload).decode('utf-8')
+    @classmethod
+    def recover_secret(cls, shares):
+        """Lagrange İnterpolasyonu ile gizli anahtarı yeniden birleştirir."""
+        def _extended_gcd(a, b):
+            if b == 0: return a, 1, 0
+            g, x, y = _extended_gcd(b, a % b)
+            return g, y, x - (a // b) * y
 
-    def decrypt_data(self, cipher_text: str, secret_pass: str) -> str:
-        """Şifreli veriyi orijinal metne geri döndürür."""
+        def _mod_inverse(k):
+            _, x, _ = _extended_gcd(k, cls._PRIME)
+            return (x % cls._PRIME + cls._PRIME) % cls._PRIME
+
+        k = len(shares)
+        xs, ys = zip(*shares)
+        secret = 0
+        for i in range(k):
+            numerator, denominator = 1, 1
+            for j in range(k):
+                if i != j:
+                    numerator = (numerator * (-xs[j])) % cls._PRIME
+                    denominator = (denominator * (xs[i] - xs[j])) % cls._PRIME
+            lagrange_coeff = (numerator * _mod_inverse(denominator)) % cls._PRIME
+            secret = (secret + ys[i] * lagrange_coeff) % cls._PRIME
+        return secret
+
+
+# ====================================================================
+# ENGINE 4: SAST & STATİK KOD ENTROPİ DENETÇİSİ
+# ====================================================================
+class SASTEngine:
+    UNSAFE_FUNCTIONS = {'eval', 'exec', 'system', 'popen'}
+
+    @classmethod
+    def audit_python_file(cls, filepath: str):
+        log_info(f"Kod Güvenlik Analizi Yapılıyor: {filepath}")
+        if not os.path.exists(filepath):
+            log_danger("Dosya bulunamadı!")
+            return None
+
+        issues = []
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            code = f.read()
+
+        # AST Sözdizim Ağacı Analizi
         try:
-            raw_payload = base64.b64decode(cipher_text.encode('utf-8'))
-            salt = raw_payload[:16]
-            cipher_bytes = raw_payload[16:]
-            
-            key = self._derive_key(secret_pass, salt)
-            plain_bytes = bytearray()
-            for i in range(len(cipher_bytes)):
-                plain_bytes.append(cipher_bytes[i] ^ key[i % len(key)])
+            tree = ast.parse(code, filename=filepath)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Name) and node.func.id in cls.UNSAFE_FUNCTIONS:
+                        issues.append({
+                            "line": node.lineno,
+                            "type": "Unsafe Function Call",
+                            "detail": f"Riskli fonksiyon kullanımı tespit edildi: {node.func.id}()"
+                        })
+        except Exception as e:
+            issues.append({"line": 0, "type": "Parse Error", "detail": str(e)})
 
-            return plain_bytes.decode('utf-8')
-        except Exception:
-            return "[!] HATA: Geçersiz Parola veya Bozuk Şifreli Veri!"
+        # Entropi Tabanlı Gizli Anahtar Taraması (Hardcoded Secrets/Tokens)
+        for idx, line in enumerate(code.splitlines(), 1):
+            for word in line.split():
+                if len(word) > 20:
+                    ent = NetworkEntropyEngine.calculate_entropy(word.encode('utf-8'))
+                    if ent > 4.5:
+                        issues.append({
+                            "line": idx,
+                            "type": "High Entropy String Leak",
+                            "detail": f"Unutulmuş API Key / Token Şüphesi (Entropi: {round(ent, 2)})"
+                        })
 
-    def embed_stego_text(self, cover_text: str, hidden_payload: str) -> str:
-        """Gizli metni görünmez boşluk karakterleri (Steganography) ile saklar."""
-        binary_payload = ''.join(format(ord(c), '08b') for c in hidden_payload)
-        # 0 = Zero-width space (\u200B), 1 = Zero-width non-joiner (\u200C)
-        stego_markers = binary_payload.replace('0', '\u200b').replace('1', '\u200c')
-        return cover_text + stego_markers + '\u200d'
+        log_success(f"SAST Analizi Tamamlandı! Bulunan Risk Sayısı: {len(issues)}")
+        return issues
 
-    def extract_stego_text(self, stego_text: str) -> str:
-        """Metin içindeki gizli işaretleri çözer."""
-        try:
-            if '\u200d' not in stego_text:
-                return "[!] Herhangi bir gizli veri izine rastlanmadı."
-            
-            hidden_part = stego_text.split('\u200d')[0]
-            binary_str = ""
-            for char in hidden_part:
-                if char == '\u200b':
-                    binary_str += '0'
-                elif char == '\u200c':
-                    binary_str += '1'
 
-            bytes_list = [int(binary_str[i:i+8], 2) for i in range(0, len(binary_str), 8)]
-            return bytes(bytes_list).decode('utf-8')
-        except Exception:
-            return "[!] HATA: Gizli veri ayıklanamadı!"
+# ====================================================================
+# UNIFIED INTERACTIVE CONSOLE
+# ====================================================================
+def banner():
+    print(f"""{Colors.CYAN}{Colors.BOLD}
+   ██╗   ██╗███╗   ██╗██╗██████╗     ███████╗███████╗███╗   ██╗████████╗██╗███╗   ██╗███████╗██╗     
+   ██║   ██║████╗  ██║██║██╔══██╗    ██╔════╝██╔════╝████╗  ██║╚══██╔══╝██║████╗  ██║██╔════╝██║     
+   ██║   ██║██╔██╗ ██║██║██║  ██║    ███████╗█████╗  ██╔██╗ ██║   ██║   ██║██╔██╗ ██║█████╗  ██║     
+   ╚██╗ ██╔╝██║╚██╗██║██║██║  ██║    ╚════██║██╔══╝  ██║╚██╗██║   ██║   ██║██║╚██╗██║██╔══╝  ██║     
+    ╚████╔╝ ██║ ╚████║██║██████╔╝    ███████║███████╗██║ ╚████║   ██║   ██║██║ ╚████║███████╗███████╗
+     ╚═══╝  ╚═╝  ╚═══╝╚═╝╚═════╝     ╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝
+                            [ UNIFIED DEFENSE & FORENSIC ENGINE v1.0 ]
+    {Colors.END}""")
 
-    async def run(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        mode = payload.get("mode")
-        if mode == "encrypt":
-            result = self.encrypt_data(payload["text"], payload["passphrase"])
-            return {"status": "SUCCESS", "cipher_text": result}
-        elif mode == "decrypt":
-            result = self.decrypt_data(payload["cipher"], payload["passphrase"])
-            return {"status": "SUCCESS", "plain_text": result}
-        elif mode == "stego_hide":
-            result = self.embed_stego_text(payload["cover"], payload["secret"])
-            return {"status": "SUCCESS", "stego_output": result}
-        elif mode == "stego_extract":
-            result = self.extract_stego_text(payload["stego_text"])
-            return {"status": "SUCCESS", "extracted_secret": result}
-        return {"error": "Bilinmeyen Kip"}
-
-# ==============================================================================
-# ANA ÇEKİRDEK YÖNETİCİSİ (VOID-EX ENGINE CORE)
-# ==============================================================================
-class VoidExEngine:
-    def __init__(self):
-        self.modules: Dict[str, BaseVoidModule] = {}
-        self._register_default_modules()
-
-    def _register_default_modules(self):
-        recon = ReconModule()
-        crypto = CryptoStegoModule()
-        self.modules[recon.module_name] = recon
-        self.modules[crypto.module_name] = crypto
-
-    def print_banner(self):
-        os.system("cls" if os.name == "nt" else "clear")
-        banner = f"""{TermColor.MAGENTA}
-██╗   ██╗███╗   ██╗██████╗     ███████╗██╗  ██╗
-██║   ██║████╗  ██║██╔══██╗    ██╔════╝╚██╗██╔╝
-██║   ██║██╔██╗ ██║██║  ██║    █████╗   ╚███╔╝ 
-██║   ██║██║╚██╗██║██║  ██║    ██╔══╝   ██╔██╗ 
-╚██████╔╝██║ ╚████║██████╔╝    ███████╗██╔╝ ██╗
- ╚═════╝ ╚═╝  ╚═══╝╚═════╝     ╚══════╝╚═╝  ╚═╝
-{TermColor.CYAN}[ APEX CORE v1.0 // Operator: LENY | Framework Standard: Enterprise ]{TermColor.RESET}
-        """
-        print(banner)
-
-    async def execute_module(self, module_name: str, payload: Any) -> Dict[str, Any]:
-        if module_name not in self.modules:
-            return {"error": f"Modül bulunamadı: {module_name}"}
-        return await self.modules[module_name].run(payload)
-
-# ==============================================================================
-# KULLANICI ARAYÜZÜ VE İNTERAKTİF KOMUT MERKEZİ
-# ==============================================================================
-async def main_cli():
-    engine = VoidExEngine()
-
+def main():
+    os.system('cls' if os.name == 'nt' else 'clear')
+    banner()
+    
     while True:
-        engine.print_banner()
-        print(f"{TermColor.BOLD}KULLANILABİLİR OPERASYON MODÜLLERİ:{TermColor.RESET}")
-        print(f"{TermColor.GREEN}[1]{TermColor.RESET} OSINT & Ağ Keşif Motoru (ReconIntel)")
-        print(f"{TermColor.GREEN}[2]{TermColor.RESET} Kriptografik Şifreleyici (AES/PBKDF2)")
-        print(f"{TermColor.GREEN}[3]{TermColor.RESET} Veri Gizleme Motoru (Steganography)")
-        print(f"{TermColor.RED}[0]{TermColor.RESET} Güvenli Çıkış")
+        print(f"\n{Colors.BOLD}=== ANA KONTROL PANELİ ==={Colors.END}")
+        print("1. [DFIR Engine]  Sistem Triage & Adli Bilişim Taraması")
+        print("2. [NET Engine]   Veri / Paket Entropi Analizi")
+        print("3. [CRYPT Vault]  Shamir Secret Sharing Anahtar Bölümleme & Kurtarma")
+        print("4. [SAST Engine]  Statik Kod Güvenlik & Gizli Anahtar Analizi")
+        print("5. [Full Suite]   Tüm Sistem Motorlarını Sırayla Çalıştır ve Raporla")
+        print("0. Çıkış")
         
-        choice = input(f"\n{TermColor.YELLOW}VOID-EX >> Operasyon Seçiniz [0-3]: {TermColor.RESET}").strip()
+        choice = input(f"\n{Colors.CYAN}VOID-SENTINEL > {Colors.END}").strip()
 
-        if choice == "1":
-            target_domain = input(f"\n{TermColor.CYAN}Hedef Domain Girin (Örn: example.com): {TermColor.RESET}").strip()
-            if target_domain:
-                start_time = time.time()
-                result = await engine.execute_module("RECON-INTEL-V1", target_domain)
-                elapsed = time.time() - start_time
+        if choice == '1':
+            data = TriageEngine.run_system_triage()
+            with open("triage_report.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+            log_success("Rapor 'triage_report.json' dosyasına yazıldı.")
 
-                print("\n" + "=" * 65)
-                print(f"{TermColor.BOLD}OPERASYON SONUÇ RAPORU ({elapsed:.2f} saniye){TermColor.RESET}")
-                print("=" * 65)
-                
-                if "error" in result:
-                    print(f"{TermColor.RED}{result['error']}{TermColor.RESET}")
-                else:
-                    print(f"Hedef Domain : {result['domain']}")
-                    print(f"Hedef IP     : {result['ip']}")
-                    print(f"\n{TermColor.GREEN}AÇIK PORTLAR VE SERVİSLER:{TermColor.RESET}")
-                    if result['open_ports']:
-                        for p, banner in result['open_ports'].items():
-                            print(f"  -> Port {p:<5} | Status: AÇIK | Banner: {banner}")
-                    else:
-                        print("  -> Hiçbir standart port açık olarak tespit edilemedi.")
+        elif choice == '2':
+            text = input("Analiz edilecek veriyi girin: ").encode('utf-8')
+            res = NetworkEntropyEngine.analyze_payload_entropy(text)
+            print(json.dumps(res, indent=4, ensure_ascii=False))
 
-                    print(f"\n{TermColor.MAGENTA}SSL SERTİFİKA DETAYLARI:{TermColor.RESET}")
-                    for k, v in result['ssl_info'].items():
-                        print(f"  -> {k:<15}: {v}")
+        elif choice == '3':
+            sec = int(input("Gizli Sayısal Anahtar (Örn: 123456789): "))
+            n = int(input("Toplam Parça Sayısı (N): "))
+            k = int(input("Kurtarma İçin Gerekli Eşik Sayı (K): "))
+            shares = ShamirSecretVault.split_secret(sec, k, n)
+            log_success(f"Oluşturulan {n} Parça:")
+            for s in shares:
+                print(f"  Parça {s[0]}: {s[1]}")
+            
+            log_info(f"Rastgele {k} parça kullanılarak anahtar geri birleştiriliyor...")
+            selected = shares[:k]
+            recovered = ShamirSecretVault.recover_secret(selected)
+            log_success(f"Kurtarılan Anahtar: {recovered}")
 
-            input(f"\n{TermColor.GRAY}Devam etmek için ENTER'a basın...{TermColor.RESET}")
+        elif choice == '4':
+            path = input("Taranacak Python Dosya Yolu: ").strip()
+            issues = SASTEngine.audit_python_file(path)
+            if issues:
+                print(json.dumps(issues, indent=4, ensure_ascii=False))
 
-        elif choice == "2":
-            sub_choice = input(f"\n{TermColor.CYAN}[1] Şifrele | [2] Şifre Çöz: {TermColor.RESET}").strip()
-            crypto_mod = engine.modules["CRYPTO-STEGO-V1"]
+        elif choice == '5':
+            log_info("Tam Tarama Modu Başlatıldı...")
+            t_data = TriageEngine.run_system_triage()
+            log_success("Sistem Triage Tamam.")
+            
+            s_issues = SASTEngine.audit_python_file(__file__)
+            log_success("Sözdizim Taraması Tamam.")
 
-            if sub_choice == "1":
-                text = input("Şifrelenecek Metin: ").strip()
-                pas = input("Gizli Parola: ").strip()
-                res = await crypto_mod.run({"mode": "encrypt", "text": text, "passphrase": pas})
-                print(f"\n{TermColor.GREEN}[✓] ŞIFRELI ÇIKTI (Base64/Payload):{TermColor.RESET}\n{res['cipher_text']}")
+            full_report = {
+                "triage": t_data,
+                "sast_self_check": s_issues
+            }
+            with open("full_sentinel_report.json", "w", encoding="utf-8") as f:
+                json.dump(full_report, f, indent=4, ensure_ascii=False)
+            log_success("Tüm rapor 'full_sentinel_report.json' olarak kaydedildi.")
 
-            elif sub_choice == "2":
-                cipher = input("Şifreli Payload: ").strip()
-                pas = input("Gizli Parola: ").strip()
-                res = await crypto_mod.run({"mode": "decrypt", "cipher": cipher, "passphrase": pas})
-                print(f"\n{TermColor.GREEN}[✓] ÇÖZÜLEN ORİJİNAL METİN:{TermColor.RESET}\n{res['plain_text']}")
-
-            input(f"\n{TermColor.GRAY}Devam etmek için ENTER'a basın...{TermColor.RESET}")
-
-        elif choice == "3":
-            sub_choice = input(f"\n{TermColor.CYAN}[1] Metne Veri Gizle | [2] Gizli Veriyi Çıkar: {TermColor.RESET}").strip()
-            crypto_mod = engine.modules["CRYPTO-STEGO-V1"]
-
-            if sub_choice == "1":
-                cover = input("Dışarıdan Görünecek Masum Metin: ").strip()
-                secret = input("İçine Gizlenecek Gizli Mesaj: ").strip()
-                res = await crypto_mod.run({"mode": "stego_hide", "cover": cover, "secret": secret})
-                print(f"\n{TermColor.GREEN}[✓] STEGO METIN OLUŞTURULDU (Kopyalayıp Gönderebilirsin):{TermColor.RESET}\n{res['stego_output']}")
-
-            elif sub_choice == "2":
-                stego_in = input("Gizli İçeriği Olan Metni Yapıştırın: ").strip()
-                res = await crypto_mod.run({"mode": "stego_extract", "stego_text": stego_in})
-                print(f"\n{TermColor.GREEN}[✓] TESPİT EDİLEN GİZLİ VERİ:{TermColor.RESET}\n{res['extracted_secret']}")
-
-            input(f"\n{TermColor.GRAY}Devam etmek için ENTER'a basın...{TermColor.RESET}")
-
-        elif choice == "0":
-            print(f"\n{TermColor.RED}[!] VOID-EX APEX Core Kapatılıyor. Güvenli Oturum Sonu.{TermColor.RESET}")
+        elif choice == '0':
+            log_info("VOID-SENTINEL kapatılıyor. Güvenli günler!")
             sys.exit(0)
+        else:
+            log_warn("Geçersiz seçim, tekrar deneyin.")
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main_cli())
-    except KeyboardInterrupt:
-        print(f"\n\n{TermColor.RED}[!] Kullanıcı Tarafından İptal Edildi.{TermColor.RESET}")
-        sys.exit(0)
+    main()
